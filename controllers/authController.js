@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import userModel from '../models/userModel.js';
 import jwt from 'jsonwebtoken';
+import transporter from '../config/nodemailer.js'
 
 export const register = async (req,res) => {
     const {name, email, password} = req.body;
@@ -30,6 +31,16 @@ export const register = async (req,res) => {
             sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
             maxAge: 5 * 24 * 60 * 60 * 1000
         });
+
+        // Sending Welcome Email
+        const mailOptions = {
+            from: process.env.SENDER_EMAIL,
+            to: email,
+            subject: 'Welcome to MERN Auth',
+            text: `Hello ${user.name}, Welcome to MERN Auth. Your account has been created with email id: ${email}`,
+        }
+
+        await transporter.sendMail(mailOptions);
 
         return res.json({seccess: true, message: 'User created successfully'});
 
@@ -82,5 +93,126 @@ export const logout = async (req,res) => {
             return res.json({success: true, message: 'Logged out successfully'});
     } catch (error) {
         return res.json({success: false, message: error.message});
+    }
+}
+
+export const sendVerifyOtp = async (req,res) => {
+    try {
+        const {userId} = req.body;
+
+        const user =  await userModel.findById(userId);
+
+        if(user.isAccountVerified) {
+            return res.json({success: false, message: 'Account already verified'});
+        }
+
+        const otp = String(Math.floor(100000 + Math.random() * 900000));
+
+        user.verifyOtp = otp;
+        user.verifyOtpExpireAt = Date.now() + 10 * 60 * 1000;
+
+        await user.save();
+
+        const mailOptions = {
+            from: process.env.SENDER_EMAIL,
+            to: user.email,
+            subject: 'Account Verification OTP',
+            text: `Hello ${user.name}, Your OTP for account verification is ${otp}`,
+        }
+
+        await transporter.sendMail(mailOptions);
+
+        res.json({success: true, message: 'OTP sent successfully'});
+    } catch (error) {
+        return res.json({success: false, message: error.message});
+        
+    }
+}
+
+export const verifyEmail  = async (req,res) => {
+    
+    const {userId, otp} = req.body;
+
+    if(!userId || !otp) {
+        return res.json({success: false, message: "Missing Details"});
+    }
+    
+    try {
+        const user = await userModel.findById(userId);
+
+        if (!user) {
+            return res.json({success: false, message: 'User not found'});
+            }
+
+            if (user.verifyOtp === '' || user.verifyOtp !== otp) {
+                return res.json({success: false, message: 'Invalid OTP'});
+            }
+
+            if (user.verifyOtpExpireAt < Date.now()) {
+                return res.json({success: false, message: 'OTP expired'});
+            }
+
+            user.isAccountVerified = true;
+            user.verifyOtp = '';
+            user.verifyOtpExpireAt = 0;
+
+            user.save();
+            return res.json({success: true, message: 'Account verified successfully'});
+
+        } catch (error) {
+            return res.json({success: false, message: error.message});
+            
+    }
+
+        
+    
+}
+
+// Check if user is already authenticated
+export const isAuthenticated = async (req,res) => {
+    try {
+        return res.json({success: true, message: 'Authenticated'});
+    } catch (error) {
+        return res.json({success: false, message: error.message});
+    }
+}
+
+// Send Password reset opt
+export const sendResetOtp = async (req,res) => {
+    const {email} = req.body;
+
+    if (!email) {
+        return res.json({success: false, message: 'Email is required'});
+    }
+
+    try {
+        const user = await userModel.findOne({email});
+
+        if (!user) {
+            return res.json({success: false, message: 'User not found'});
+        }
+
+        const otp = String(Math.floor(100000 + Math.random() * 900000));
+
+        user.resetOtp = otp;
+        user.resetOtpExpireAt = Date.now() + 8 * 60 * 1000;
+
+        await user.save();
+
+        const mailOptions = {
+            from: process.env.SENDER_EMAIL,
+            to: user.email,
+            subject: 'Password Reset OTP',
+            text: `Hello ${user.name}, Your OTP for password reset is ${otp}`,
+        }
+
+        await transporter.sendMail(mailOptions);
+
+        res.json({success: true, message: 'OTP sent successfully'});
+        
+
+    } catch (error) {
+        return res.json({success: false, message: error.message});
+        
     }
 }
